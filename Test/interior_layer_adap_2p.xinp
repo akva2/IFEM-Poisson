@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<simulation>
+    <!--General - geometry definitions-->
+    <geometry nx="2" ny="1" dim="2" sets="true">
+      <raiseorder lowerpatch="1" upperpatch="2" u="2" v="2"/>
+      <refine lowerpatch="1" upperpatch="2" type="uniform" u="7" v="15"/>
+      <topology>
+        <connection master="1" midx="2" slave="2" sidx="1"/>
+      </topology>
+    </geometry>
+
+    <!-- General - numerical integration scheme !-->
+    <discretization>
+        <nGauss>4 4</nGauss>
+    </discretization>
+
+    <!--General - boundary conditions-->
+    <boundaryconditions>
+        <neumann comp="1" set="Edge3" type="anasol"/>
+        <dirichlet comp="1" set="Edge1" type="anasol"/>
+        <neumann comp="1" set="Edge2" type="anasol"/>
+        <dirichlet comp="1" set="Edge4" type="anasol"/>
+    </boundaryconditions>
+    <!--General - adaptive refinement parameters -->
+    <adaptive>
+        <maxstep>5</maxstep>
+        <beta type="threshold">10</beta>
+        <maxdof>10000</maxdof>
+        <errtol>0.000001</errtol>
+        <symmetry>1</symmetry>
+        <knot_mult>1</knot_mult>
+        <use_norm>0</use_norm>
+        <scheme>isotropic_function</scheme>
+    </adaptive>
+    <!--App specific block-->
+    <poisson adaptive="true">
+        <isotropic code="0" kappa="1"/>
+        <anasol type="interiorlayer"/>
+        <source type="interiorlayer"/>
+    </poisson>
+</simulation>
