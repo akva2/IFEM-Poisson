@@ -22,6 +22,7 @@
 #include "SIM3D.h"
 #include "Utilities.h"
 #include "DataExporter.h"
+#include "Functions.h"
 #include "IFEM.h"
 #include "tinyxml.h"
 #include <fstream>
@@ -49,6 +50,7 @@ public:
   {
     Dim::myProblem = nullptr; // Because it is not dynamically allocated
     Dim::myInts.clear();
+    delete addProj;
 
     // To prevent the SIMbase destructor try to delete already deleted functions
     if (aCode[0] > 0) Dim::myScalars.erase(aCode[0]);
@@ -253,6 +255,13 @@ public:
     if (!this->writeGlvN(myNorm,1,nBlock,prefix.data()))
       return false;
 
+    if (addProj) {
+      Vector pA;
+      pA.resize(this->getNoDOFs());
+      this->project(pA, addProj, 1, 0, 1, SIMoptions::CGL2);
+      this->writeGlvS(pA, "CGL2 additional function", 1, nBlock);
+    }
+
     return this->writeGlvStep(1,0.0,1);
   }
 
@@ -391,6 +400,9 @@ protected:
         mVec.push_back(kappa);
         std::cout <<"\tMaterial code "<< code <<": "<< kappa << std::endl;
       }
+      else if (!strcasecmp(child->Value(),"addProj")) {
+        addProj = utl::parseRealFunc(child->FirstChild()->Value());
+      }
 
       else if (!prob.parse(child))
         result &= this->Dim::parse(child);
@@ -452,6 +464,7 @@ private:
 
   bool        vizRHS;    //!< If \e true, store load vector to VTF
   std::string asciiFile; //!< ASCII output file prefix
+  RealFunc* addProj = nullptr;
 };
 
 
