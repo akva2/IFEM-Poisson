@@ -19,6 +19,7 @@
 #include "Vec3.h"
 
 
+class FunctionBase;
 class RealFunc;
 class VecFunc;
 
