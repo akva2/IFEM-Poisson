@@ -33,7 +33,7 @@
   </poisson>
 
   <postprocessing>
-    <function name="test">x</function>
+    <function name="random">randomize(&amp;seed); r=random(0,1,&amp;seed); max(0.0,r)</function>
   </postprocessing>
 
 </simulation>

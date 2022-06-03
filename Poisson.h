@@ -220,6 +220,11 @@ public:
             m_mode == SIM::NORMS);
   }
 
+  void setWaveNumber(double w)
+  {
+    waveNr = w;
+  }
+
 private:
   // Physical properties
   double    kappaC;  //!< Conductivity (constant)
@@ -230,6 +235,8 @@ private:
 
   FunctionBase*              dualRHS; //!< Extraction function for dual RHS
   std::vector<FunctionBase*> dualFld; //!< Extraction functions for VCP
+
+  double waveNr = 0.0; //!< Wave number (Helmholtz)
 
   GlobalIntegral* reacInt; //!< Reaction-forces-only integral
 

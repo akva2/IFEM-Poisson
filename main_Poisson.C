@@ -25,6 +25,7 @@
 #include "SIMoptions.h"
 #include "SIMSolver.h"
 #include "SIMSolverAdap.h"
+#include "SIMExtruded.h"
 #include "Utilities.h"
 
 #include <cctype>
@@ -73,6 +74,8 @@ public:
       dumpASCII = true;
     else if (!strncmp(argv[i],"-dualadap",9))
       adap = 'd';
+    else if (!strcmp(argv[i],"-extruded"))
+      dim = -3;
     else
       return this->parseArg(argv[i]);
 
@@ -121,6 +124,36 @@ int runSimulator(char* infile, const PoissonArgs& arg)
 
   if (arg.dumpASCII)
     model.setASCIIfile(infile);
+
+  if (model.opt.dumpHDF5(infile))
+    solver.handleDataOutput(model.opt.hdf5,model.getProcessAdm());
+
+  return solver.solveProblem(infile,"Solving the Poisson problem");
+}
+
+
+int runSimulatorExt(char* infile, const PoissonArgs& arg)
+{
+  SIMExtruded<SIMPoisson> model;
+  SIMSolverStat<SIMExtruded<SIMPoisson>> solver(model);
+
+  utl::profiler->start("Model input");
+
+  // Read in model definitions
+  if (!model.read(infile) || !solver.read(infile))
+    return 1;
+
+  // Boundary conditions can be ignored only in generalized eigenvalue analysis
+  if (model.opt.eig != 4 && model.opt.eig != 6)
+    SIMbase::ignoreDirichlet = false;
+
+  model.opt.print(IFEM::cout,true) << std::endl;
+
+  utl::profiler->stop("Model input");
+
+  // Establish the FE data structures
+  if (!model.preprocess() || !model.initSystem())
+    return 2;
 
   if (model.opt.dumpHDF5(infile))
     solver.handleDataOutput(model.opt.hdf5,model.getProcessAdm());
@@ -239,6 +272,7 @@ int main (int argc, char** argv)
     case 1: return runSimulator<SIM1D>(infile,args);
     case 2: return runSimulator<SIM2D>(infile,args);
     case 3: return runSimulator<SIM3D>(infile,args);
+    case -3: return runSimulatorExt(infile,args);
     }
 
   return 0;

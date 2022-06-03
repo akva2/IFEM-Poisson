@@ -172,7 +172,7 @@ LocalIntegral* Poisson::getLocalIntegral (size_t nen, size_t,
       break;
 
     case SIM::VIBRATION:
-      result->resize(1,0);
+      result->resize(2,0);
       break;
 
     case SIM::RHS_ONLY:
@@ -200,9 +200,15 @@ bool Poisson::evalInt (LocalIntegral& elmInt, const FiniteElement& fe,
   // Conductivity scaled by integration point weight at this point
   double cw = this->getMaterial(X)*fe.detJxW;
 
-  if (!elMat.A.empty())
+  if (!elMat.A.empty()) {
     // Integrate the coefficient matrix // EK += kappa * dNdX * dNdX^T * |J|*w
     elMat.A.front().multiply(fe.dNdX,fe.dNdX,false,true,true,cw);
+    if (waveNr != 0.0)
+      elMat.A.front().outer_product(fe.N,fe.N,true,waveNr);
+    if (elMat.A.size() > 1)
+      elMat.A[1].outer_product(fe.N,fe.N,true,1.0);
+  }
+
 
   // Lambda function for integration of the internal force vector
   auto&& evalIntForce = [cw,fe](Vector& S, const Vector& eV)

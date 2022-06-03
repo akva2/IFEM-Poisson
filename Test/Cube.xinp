@@ -4,8 +4,7 @@
 
   <!-- General - geometry definitions !-->
   <geometry>
-    <raiseorder patch="1" u="1" v="1" w="1"/>
-    <refine type="uniform" patch="1" u="7" v="7" w="7"/>
+    <refine type="uniform" patch="1" u="7" v="7" w="3"/>
     <topologysets>
       <set name="Boundary" type="face">
         <item patch="1">1 2 3 4 5 6</item>
@@ -22,12 +21,20 @@
   <poisson>
     <source type="expression">3*PI*PI*sin(x*PI)*sin(y*PI)*sin(z*PI)</source>
     <anasol type="expression">
-      <primary>sin(PI*x)*sin(PI*y)*sin(z*PI)</primary>
+      <primary>random(0,1,&amp;seed)*z*(2-z)</primary>
       <secondary>-PI*cos(PI*x)*sin(PI*y)*sin(z*PI) |
                  -PI*sin(PI*x)*cos(PI*y)*sin(PI*z) |
                  -PI*sin(PI*x)*sin(PI*y)*cos(PI*z)
       </secondary>
     </anasol>
   </poisson>
+
+  <discretization>
+    <nGauss>3</nGauss>
+  </discretization>
+
+  <postprocessing>
+    <function name="T" type="expression">random(0,1,&amp;seed)*z*(2-z)</function>
+  </postprocessing>
 
 </simulation>

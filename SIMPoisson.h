@@ -41,6 +41,8 @@ class TiXmlElement;
 template<class Dim> class SIMPoisson : public SIMMultiPatchModelGen<Dim>
 {
 public:
+  struct SetupProps {};
+
   //! \brief Default constructor.
   explicit SIMPoisson(bool checkRHS = false, bool ds = false);
 
@@ -117,6 +119,13 @@ public:
   //! parts of a partitioned solution method and are used to identify the basis
   //! for the result fields associated with each simulator in the HDF5 output.
   std::string getName() const override { return "Poisson"; }
+
+  //! \brief Set input context.
+  void setCtx(size_t ctx);
+
+  void setWaveNumber(double waveNr) { prob.setWaveNumber(waveNr); }
+
+  Vector& getSolution() { return mySolVec; }
 
 protected:
   //! \brief Performs some pre-processing tasks on the FE model.
@@ -195,6 +204,7 @@ private:
 
   bool        vizRHS;    //!< If \e true, store load vector to VTF
   std::string asciiFile; //!< ASCII output file prefix
+  std::string inputContext = "poisson"; //!< Input context to parse
 };
 
 #endif

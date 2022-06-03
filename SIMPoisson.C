@@ -449,7 +449,7 @@ bool SIMPoisson<Dim>::parse (const TiXmlElement* elem)
   if (!strcasecmp(elem->Value(),"postprocessing"))
     prob.parse(elem->FirstChildElement("projection"));
 
-  if (strcasecmp(elem->Value(),"poisson"))
+  if (strcasecmp(elem->Value(),inputContext.c_str()))
     return this->Dim::parse(elem);
 
   bool result = true;
@@ -521,6 +521,13 @@ bool SIMPoisson<Dim>::initNeumann (size_t propInd)
     return false;
 
   return true;
+}
+
+
+template<class Dim>
+void SIMPoisson<Dim>::setCtx (size_t ctx)
+{
+  inputContext = "poisson" + (ctx > 0 ? std::to_string(ctx) : "");
 }
 
 
