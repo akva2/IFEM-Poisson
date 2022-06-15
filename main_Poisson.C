@@ -27,6 +27,11 @@
 #include "SIMSolverAdap.h"
 #include "Utilities.h"
 
+#include "ASMs2D.h"
+#include "PETScMatrix.h"
+#include "SAM.h"
+#include <GoTools/geometry/SplineSurface.h>
+
 #include <cctype>
 #include <cstring>
 #include <iostream>
@@ -129,6 +134,146 @@ int runSimulator(char* infile, const PoissonArgs& arg)
 }
 
 
+template<class Dim>
+int run2Grid(char* infile, const PoissonArgs& arg)
+{
+  SIMPoisson<Dim> model(arg.checkRHS,arg.dualSol);
+  SIMPoisson<Dim> fineModel(arg.checkRHS,arg.dualSol);
+
+  utl::profiler->start("Model input");
+
+  // Read in model definitions
+  if (!fineModel.read(infile))
+    return 1;
+
+   if (!fineModel.initSystem(fineModel.opt.solver,1,1)))
+     return 2;
+
+   if (!fineModel.preprocess(arg.ignoredPatches,arg.fixDup)))
+     return 3;
+
+  if (!fineModel.assembleSystem())
+    return 5;
+
+  for (size_t i = 0; i < 2; ++i) {
+    SIMPoisson<Dim> model(arg.checkRHS,arg.dualSol);
+    std::string infile2(infile);
+    infile2.replace(strlen(infile)-5, 5, std::to_string(i+2)+".xinp");
+
+    // Read in model definitions
+    if (!model2.read(infile2.c_str()))
+      return 1;
+
+  utl::profiler->stop("Model input");
+
+  // Establish the FE data structures
+  if (!model.preprocess(arg.ignoredPatches,arg.fixDup) ||
+      !model2.preprocess(arg.ignoredPatches,arg.fixDup))
+    return 2;
+
+  if (!model.initSystem(model.opt.solver,1,1) ||
+      !model2.initSystem(model.opt.solver,1,1))
+    return 3;
+
+  if (!model.setMode(SIM::STATIC) || !model2.setMode(SIM::STATIC))
+    return 4;
+
+  if (!model.assembleSystem())
+    return 5;
+
+  Mat P;
+  MatCreate(*model.getProcessAdm().getCommunicator(), &P);
+  MatSetSizes(P, model2.getNoEquations(), model.getNoEquations(),
+              PETSC_DETERMINE, PETSC_DETERMINE);
+  MatSetUp(P);
+
+  std::array<RealArray,2> gpar;
+  static_cast<ASMs2D*>(model2.getPatch(1))->getGrevilleParameters(gpar[0], 0);
+  static_cast<ASMs2D*>(model2.getPatch(1))->getGrevilleParameters(gpar[1], 1);
+
+  ASMs2D* fpch = static_cast<ASMs2D*>(model.getPatch(1));
+
+  const SAM* toSam = model2.getSAM();
+  const SAM* fSam = model.getSAM();
+
+  int p1 = fpch->getBasis(1)->order_u();
+  int p2 = fpch->getBasis(1)->order_v();
+  int n1 = fpch->getBasis(1)->numCoefs_u();
+  int n2 = fpch->getBasis(1)->numCoefs_v();
+
+  size_t node = 1;
+  for (double v : gpar[1])
+    for (double u : gpar[0]) {
+      int rowIdx = toSam->getEquation(node++, 1);
+      if (rowIdx < 1)
+        continue;
+      Vector N;
+      Go::BasisPtsSf spline;
+      fpch->getBasis(1)->computeBasis(u,v,spline);
+      IntVec idx;
+      ASMs2D::scatterInd(n1,n2,p1,p2,spline.left_idx,idx);
+      for (size_t i = 0; i < idx.size(); ++i) {
+        int colIdx = fSam->getEquation(idx[i]+1,1);
+        if (colIdx > 0)
+          MatSetValue(P, rowIdx-1, colIdx-1, spline.basisValues[i], INSERT_VALUES);
+      }
+    }
+
+  MatAssemblyBegin(P,MAT_FINAL_ASSEMBLY);
+  MatAssemblyEnd(P,MAT_FINAL_ASSEMBLY);
+
+  /*
+  Vector sol;
+  if (!model.solveSystem(sol))
+    return 6;
+
+  Vec from = static_cast<PETScVector*>(model.getSysVec())->getVector();
+  Vec to = static_cast<PETScVector*>(model2.getSysVec())->getVector();
+
+  MatMult(P, from, to);
+
+  Vector sol2(model2.getNoDOFs());
+  toSam->expandSolution(*model2.getSysVec(),sol2,1.0);
+
+  int geoBlk = 0, nBlock = 0;
+  if (!model2.saveModel(infile,geoBlk,nBlock))
+    return 7;
+
+  model2.setSol(&sol2);
+  TimeStep dummy;
+  model2.saveStep(dummy, nBlock);
+  */
+
+  Mat A = static_cast<PETScMatrix*>(model2.getSysMat())->getMatrix();
+  Mat A2 = static_cast<PETScMatrix*>(model.getSysMat())->getMatrix();
+
+  MatView(A2, PETSC_VIEWER_STDOUT_WORLD);
+
+  KSP ksp;
+  KSPCreate(*model2.getProcessAdm().getCommunicator(), &ksp);
+  KSPSetType(ksp, KSPGMRES);
+  KSPSetOperators(ksp,A,A);
+  PC pc;
+  KSPGetPC(ksp,&pc);
+  PCSetType(pc,PCMG);
+  PCMGSetLevels(pc, 2, nullptr);
+  PCMGSetGalerkin(pc, PC_MG_GALERKIN_PMAT);
+  PCMGSetType(pc, PC_MG_MULTIPLICATIVE);
+  PCMGSetCycleType(pc, PC_MG_CYCLE_V);
+  PCMGSetNumberSmooth(pc,2);
+  PCMGSetOperators(pc, 0, A2, A2);
+  PCMGSetInterpolation(pc, 1, P);
+  PCSetUp(pc);
+  KSPSetFromOptions(ksp);
+  KSPSetUp(ksp);
+
+  Vec to = static_cast<PETScVector*>(model2.getSysVec())->getVector();
+  KSPView(ksp, PETSC_VIEWER_STDOUT_WORLD);
+  KSPSolve(ksp, to, to);
+  return 0;
+}
+
+
 /*!
   \brief Main program for the NURBS-based isogeometric Poisson equation solver.
 
@@ -227,6 +372,12 @@ int main (int argc, char** argv)
 
   if (args.adap == 'd')
     args.dualSol = true;
+
+  switch (args.dim) {
+    case 1: return run2Grid<SIM1D>(infile,args);
+    case 2: return run2Grid<SIM2D>(infile,args);
+    case 3: return run2Grid<SIM3D>(infile,args);
+  }
 
   if (args.adap)
     switch (args.dim) {

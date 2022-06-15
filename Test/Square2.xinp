@@ -4,7 +4,7 @@
 
   <!-- General - geometry definitions !-->
   <geometry dim="2" scale="2.0" sets="true">
-    <refine patch="1" u="7" v="7"/>
+    <refine patch="1" u="31" v="31"/>
   </geometry>
 
   <!-- General - boundary conditions !-->

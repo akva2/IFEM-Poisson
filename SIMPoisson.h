@@ -118,6 +118,9 @@ public:
   //! for the result fields associated with each simulator in the HDF5 output.
   std::string getName() const override { return "Poisson"; }
 
+  SystemMatrix* getSysMat();
+  SystemVector* getSysVec();
+
 protected:
   //! \brief Performs some pre-processing tasks on the FE model.
   //! \details This method is reimplemented to resolve inhomogeneous boundary

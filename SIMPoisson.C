@@ -15,6 +15,7 @@
 #include "PoissonSolutions.h"
 
 #include "AnaSol.h"
+#include "AlgEqSystem.h"
 #include "DataExporter.h"
 #include "ExprFunctions.h"
 #include "IFEM.h"
@@ -251,7 +252,7 @@ bool SIMPoisson<Dim>::saveStep (TimeStep&, int& nBlock)
     return false;
 
   // Write solution fields to VTF-file
-  if (!this->writeGlvS(mySolVec,1,nBlock))
+  if (!this->writeGlvS(*solution,1,nBlock))
     return false;
 
   size_t pos = 0;
@@ -1104,6 +1105,20 @@ bool SIMPoisson<SIM3D>::parseDimSpecific (const TiXmlElement* child)
     return false;
 
   return true;
+}
+
+
+template<class Dim>
+SystemVector* SIMPoisson<Dim>::getSysVec ()
+{
+  return this->myEqSys->getVector(0);
+}
+
+
+template<class Dim>
+SystemMatrix* SIMPoisson<Dim>::getSysMat ()
+{
+  return this->myEqSys->getMatrix(0);
 }
 
 
