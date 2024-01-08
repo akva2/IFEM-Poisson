@@ -171,13 +171,7 @@ private:
   Poisson   prob;     //!< Data and methods for the Poisson problem
   Poisson::Robin robinBC; //!< Integrand for Robin conditions
 
-  //! \brief Struct with either a constant or a function value for kappa.
-  struct Kappa {
-    double constant; //!< Constant value
-    std::shared_ptr<RealFunc> func; //!< Function value
-  };
-
-  std::vector<Kappa> mVec; //!< Kappa properties
+  std::vector<Poisson::Kappa> mVec; //!< Kappa properties
   int       aCode[2]; //!< Analytical BC code (used by destructor)
   TextureProperties tprops; //!< Texture property (for kappa)
 
@@ -195,6 +189,8 @@ private:
 
   bool        vizRHS;    //!< If \e true, store load vector to VTF
   std::string asciiFile; //!< ASCII output file prefix
+
+  bool sourceFromAnaSol = false; //!< True to derive source function from analytic solution
 };
 
 #endif

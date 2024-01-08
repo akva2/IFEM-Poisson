@@ -215,7 +215,7 @@ bool Poisson::evalInt (LocalIntegral& elmInt, const FiniteElement& fe,
   if (!elMat.b.empty())
   {
     // Integrate heat source, if defined
-    if (heatSrc)
+      if (heatSrc)
       elMat.b.front().add(fe.N,(*heatSrc)(X)*fe.detJxW); // EV += N*h(x)*|J|*w
 
     if (m_mode == SIM::RHS_ONLY && !elmInt.vec.empty())
@@ -417,10 +417,10 @@ bool PoissonNorm::evalInt (LocalIntegral& elmInt, const FiniteElement& fe,
     // Evaluate the analytical heat flux
     sigma.fill((*anasol)(X).ptr(),nrcmp);
     // Integrate the energy norm a(u,u)
-    pnorm[ip++] += sigma.dot(sigma)*cwInv;
+    pnorm[ip++] += kappa*sigma.dot(sigma)*fe.detJxW;
     // Integrate the error in energy norm a(u-u^h,u-u^h)
-    error = sigma + kappa*epsh.front();
-    pnorm[ip++] += error.dot(error)*cwInv;
+    error = sigma + epsh.front();
+    pnorm[ip++] += error.dot(error)*kappa*fe.detJxW;
   }
 
   // Integrate the volume

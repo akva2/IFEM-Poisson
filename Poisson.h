@@ -36,6 +36,12 @@ class VecFunc;
 class Poisson : public IntegrandBase
 {
 public:
+  //! \brief Struct with either a constant or a function value for kappa.
+  struct Kappa {
+    double constant; //!< Constant value
+    std::shared_ptr<RealFunc> func; //!< Function value
+  };
+
   //! \brief Class representing the Robin boundary conditions.
   class Robin : public IntegrandBase
   {

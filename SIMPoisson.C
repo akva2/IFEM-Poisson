@@ -11,6 +11,7 @@
 //!
 //==============================================================================
 
+#include "PoissonSource.h"
 #include "SIMPoisson.h"
 #include "PoissonSolutions.h"
 
@@ -217,6 +218,17 @@ bool SIMPoisson<Dim>::saveModel (char* fileName, int& geoBlk, int& nBlock)
 template<class Dim>
 bool SIMPoisson<Dim>::solveStep (TimeStep&)
 {
+  if (sourceFromAnaSol) {
+    if (Dim::mySol) {
+      if (mVec.empty())
+        prob.setSource(new PoissonAnaSolSource(*Dim::mySol, prob.getMaterial()));
+      else
+        prob.setSource(new PoissonAnaSolSource(*Dim::mySol, this->mVec));
+    } else
+      std::cerr << "*** Asked to use source function from analytic solution, but no"
+                    " analytic solution given. No source function added." << std::endl;
+  }
+
   if (!this->setMode(Dim::opt.eig == 0 ? SIM::STATIC : SIM::VIBRATION))
     return false;
 
@@ -304,7 +316,7 @@ bool SIMPoisson<Dim>::saveStep (TimeStep&, int& nBlock)
     return false;
 
   size_t pos = 0;
-  for (const Kappa& f : mVec)
+  for (const Poisson::Kappa& f : mVec)
     if (f.func && !this->writeGlvF(*f.func, ("kappa" + std::to_string(++pos)).c_str(), 1, nBlock))
       return false;
 
@@ -408,6 +420,18 @@ void SIMPoisson<Dim>::preprocessA ()
     prob.setDualRHS(Dim::dualField);
 
   myProj.resize(Dim::opt.project.size());
+
+  if (sourceFromAnaSol) {
+    if (Dim::mySol) {
+      if (mVec.empty())
+        prob.setSource(new PoissonAnaSolSource(*Dim::mySol, prob.getMaterial()));
+      else
+        prob.setSource(new PoissonAnaSolSource(*Dim::mySol, this->mVec));
+    } else
+      std::cerr << "*** Asked to use source function from analytic solution, but no"
+                    " analytic solution given. No source function added." << std::endl;
+  }
+
   if (!Dim::mySol) return;
 
   Dim::myInts.insert(std::make_pair(0,Dim::myProblem));
@@ -480,7 +504,7 @@ bool SIMPoisson<Dim>::parse (char* keyWord, std::istream& is)
         prob.setMaterial(kappa);
       else
         this->setPropertyType(code,Property::MATERIAL,mVec.size());
-      mVec.push_back(Kappa{kappa, nullptr});
+      mVec.push_back(Poisson::Kappa{kappa, nullptr});
       std::cout <<"\tMaterial code "<< code <<": "<< kappa << std::endl;
     }
   }
@@ -509,7 +533,7 @@ bool SIMPoisson<Dim>::parse (const tinyxml2::XMLElement* elem)
 
     else if (!strcasecmp(child->Value(),"isotropic")) {
       int code = this->parseMaterialSet(child,mVec.size());
-      Kappa kappa{1000.0, nullptr};
+      Poisson::Kappa kappa{1000.0, nullptr};
       utl::getAttribute(child,"kappa",kappa.constant);
       if (code == 0)
         prob.setMaterial(kappa.constant);
@@ -520,7 +544,7 @@ bool SIMPoisson<Dim>::parse (const tinyxml2::XMLElement* elem)
       int code = this->parseMaterialSet(child,mVec.size());
       tprops.parse(child);
       if (tprops.hasProperty("kappa")) {
-        Kappa kappa;
+        Poisson::Kappa kappa;
         kappa.func.reset(new PropertyFunc("kappa", tprops));
         mVec.push_back(kappa);
         if (code == 0)
@@ -663,7 +687,10 @@ bool SIMPoisson<SIM1D>::parseDimSpecific (const tinyxml2::XMLElement* child)
       std::cout <<"\tHeat source function: Line L="<< L << std::endl;
       myScalars[code] = new PoissonLineSource(L);
     }
-    else if (type == "expression" && child->FirstChild()) {
+    else if (type == "anasol") {
+      sourceFromAnaSol = true;
+      IFEM::cout << "\n\tSource function: derived from analytical solution\n";
+    } else if (type == "expression" && child->FirstChild()) {
       std::cout <<"\tHeat source function: "
                 << child->FirstChild()->Value() << std::endl;
       myScalars[code] = new EvalFunction(child->FirstChild()->Value());
@@ -891,7 +918,10 @@ bool SIMPoisson<SIM2D>::parseDimSpecific (const tinyxml2::XMLElement* child)
                 << std::endl;
       myScalars[code] = new PoissonInteriorLayerSource(s);
     }
-    else if (type == "expression" && child->FirstChild()) {
+    else if (type == "anasol") {
+      sourceFromAnaSol = true;
+      IFEM::cout << "\n\tSource function: derived from analytical solution\n";
+    } else if (type == "expression" && child->FirstChild()) {
       std::cout <<"\tHeat source function: "
                 << child->FirstChild()->Value() << std::endl;
       myScalars[code] = new EvalFunction(child->FirstChild()->Value());
@@ -1089,7 +1119,10 @@ bool SIMPoisson<SIM3D>::parseDimSpecific (const tinyxml2::XMLElement* child)
                 << std::endl;
       myScalars[code] = new PoissonWaterfallSource(eps);
     }
-    else if (type == "expression" && child->FirstChild()) {
+    else if (type == "anasol") {
+      sourceFromAnaSol = true;
+      IFEM::cout << "\n\tSource function: derived from analytical solution\n";
+    } else if (type == "expression" && child->FirstChild()) {
       std::cout <<"\tHeat source function: "
                 << child->FirstChild()->Value() << std::endl;
       myScalars[code] = new EvalFunction(child->FirstChild()->Value());
