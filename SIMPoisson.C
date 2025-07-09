@@ -243,6 +243,9 @@ bool SIMPoisson<Dim>::solveStep (TimeStep&)
   if (!this->solveSystem(mySolVec,1))
     return false;
 
+  // clear out system matrices, no longer needed
+  this->Dim::myEqSys->clear();
+
   if (!Dim::opt.project.empty())
   {
     this->setMode(SIM::RECOVERY);
