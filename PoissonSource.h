@@ -40,4 +40,24 @@ protected:
   const Poisson& poisson; //!< Reference to integrand
 };
 
+
+/*!
+  \brief Class that derives the Poisson source function from the analytic solution.
+ */
+class PoissonAnaSolSourceVec : public VecFunc
+{
+public:
+  //! \brief Constructor for constant kappa
+  //! \param aSol Analytic solution to use
+  //! \param prob Reference to problem integrand (for material properties)
+  PoissonAnaSolSourceVec(const AnaSol& aSol, const Poisson& prob);
+
+protected:
+  //! \brief Evaluates the function.
+  Vec3 evaluate(const Vec3& X) const override;
+
+  const AnaSol& anaSol; //!< Reference to analytic solution
+  const Poisson& poisson; //!< Reference to integrand
+};
+
 #endif

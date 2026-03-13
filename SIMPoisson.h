@@ -21,6 +21,7 @@
 #include "SIMbase.h"
 #include "TextureProperties.h"
 
+#include <array>
 #include <cstddef>
 #include <iosfwd>
 #include <memory>
@@ -43,6 +44,9 @@ template<class Dim> class SIMPoisson : public SIMMultiPatchModelGen<Dim>
 public:
   //! \brief Default constructor.
   explicit SIMPoisson(bool checkRHS = false, bool ds = false);
+
+  //! \brief Default constructor.
+  SIMPoisson(const typename Dim::CharVec& nf, bool checkRHS = false);
 
   //! \brief The destructor zero out the integrand pointer (deleted by parent).
   virtual ~SIMPoisson();
@@ -104,6 +108,10 @@ public:
   {
     return myReact.empty() ? nullptr : &myReact;
   }
+
+  void printSolutionSummary(const Vector& solvec, int printSol,
+                            const char* compName,
+                            std::streamsize outPrec) override;
 
   //! \brief Prints a norm group to the log stream.
   //! \param[in] gNorm The global norm values
@@ -187,10 +195,10 @@ private:
 
   bool sourceFromAnaSol = false; //!< Source is derived from analytic solution
   bool constrainIntegratedSolution = false; //!< Constrain the solution integral
-  double integrated_solution = 0.0; //!< Value to constrain solution integral to
+  std::array<double,3> integrated_solution{}; //!< Value to constrain solution integral to
 
   std::vector<Kappa> mVec; //!< Kappa properties
-  int       aCode[2]; //!< Analytical BC code (used by destructor)
+  std::array<int,4>  aCode{}; //!< Analytical BC code (used by destructor)
   TextureProperties tprops; //!< Texture property (for kappa)
 
   Vector    myLoad;   //!< External load vector (for VTF export)

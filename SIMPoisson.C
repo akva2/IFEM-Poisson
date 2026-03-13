@@ -97,6 +97,68 @@ public:
   }
 };
 
+
+/*!
+  \brief Class that wraps a component of a VecFunc as a RealFunc.
+*/
+
+class SingleCompFunc : public RealFunc
+{
+public:
+  //! \brief Constructor.
+  //! \param f Vector function to wrap
+  //! \param cmp Component to use
+  SingleCompFunc(const VecFunc& f, int cmp)
+    : func(f), component(cmp)
+  {}
+
+protected:
+  //! \brief Evaluates the function.
+  Real evaluate(const Vec3&X) const override
+  {
+    Vec3 res = func(X);
+    return res[component];
+  }
+
+  const VecFunc& func; //!< Function to evaluate
+  int component; //!< Component of function to use
+};
+
+
+//! \brief Class implementing Neumann boundary conditions from anasol.
+class NeumannFromAnaSol : public TractionFunc
+{
+public:
+  //! \brief Constructor.
+  //! \param U Velocity function
+  //! \param P pressure function
+  explicit NeumannFromAnaSol(const VecFunc& U) : u(U)
+  {}
+
+protected:
+  //! \brief Evaluates the traction in a point.
+  Vec3 evaluate(const Vec3& X, const Vec3& n) const
+  {
+    return u.gradient(X) * n;
+  }
+
+private:
+  const VecFunc& u; //!< Reference to velocity function
+};
+
+}
+
+
+template<class Dim>
+SIMPoisson<Dim>::SIMPoisson (const typename Dim::CharVec& nf, bool checkRHS)
+  : SIMMultiPatchModelGen<Dim>(nf,false),
+    prob(Dim::dimension, nf.size() > 1),
+    robinBC(Dim::dimension, prob),
+    solution(&mySolVec)
+{
+  Dim::myProblem = &prob;
+  vizRHS = false;
+  dualS = false;
 }
 
 
@@ -108,7 +170,6 @@ SIMPoisson<Dim>::SIMPoisson (bool checkRHS, bool ds)
     solution(&mySolVec)
 {
   Dim::myProblem = &prob;
-  aCode[0] = aCode[1] = 0;
   vizRHS = false;
   dualS = ds;
 }
@@ -121,8 +182,8 @@ SIMPoisson<Dim>::~SIMPoisson ()
   Dim::myInts.clear();
 
   // To prevent the SIMbase destructor try to delete already deleted functions
-  if (aCode[0] > 0) Dim::myScalars.erase(aCode[0]);
-  if (aCode[1] > 0) Dim::myVectors.erase(aCode[1]);
+  if (aCode[0] > 0 && this->getNoFields() == 1) Dim::myScalars.erase(aCode[0]);
+  if (aCode[3] > 0 && this->getNoFields() == 1) Dim::myVectors.erase(aCode[3]);
 }
 
 
@@ -135,7 +196,8 @@ void SIMPoisson<Dim>::clearProperties ()
   aCode[0] = aCode[1] = 0;
 
   mVec.clear();
-  prob.setSource(nullptr);
+  prob.setSource(static_cast<RealFunc*>(nullptr));
+  prob.setSource(static_cast<VecFunc*>(nullptr));
   prob.setTraction((RealFunc*)nullptr);
   prob.setTraction((VecFunc*)nullptr);
   prob.clearGalerkinProjections();
@@ -373,6 +435,47 @@ bool SIMPoisson<Dim>::solveSystem (Vector& solution, int printSol,
 
 
 template<class Dim>
+void SIMPoisson<Dim>::
+printSolutionSummary (const Vector& solvec, int printSol,
+                       const char* compName,
+                      std::streamsize outPrec)
+{
+  if (this->getNoFields() == 1) {
+    SIMbase::printSolutionSummary(solvec, printSol, compName, outPrec);
+    return;
+  }
+  const size_t nsd = this->getNoSpaceDim();
+  std::vector<size_t> iMax(nsd);
+  std::vector<double> dMax(nsd);
+
+  double dNormu1 = this->solutionNorms(*solution, dMax.data(), iMax.data(), 1, 'D');
+  double dNormu2 = this->solutionNorms(*solution, dMax.data()+1, iMax.data()+1, 1, 'P');
+  double dNorm;
+  if (nsd == 3) {
+    double dNormu3 = this->solutionNorms(*solution, dMax.data()+2, iMax.data()+2, 1, 'Q');
+    dNorm = hypot(dNormu1, dNormu2, dNormu3);
+  } else
+    dNorm = hypot(dNormu1, dNormu2);
+
+  std::stringstream str;
+  if (Dim::adm.getProcId() == 0)
+  {
+    if (outPrec > 0) str.precision(outPrec);
+
+    str <<"  Primary solution summary: L2-norm        : "<< utl::trunc(dNorm);
+
+    char D = 'X';
+    for (size_t d = 0; d < nsd; d++, D++)
+      if (utl::trunc(dMax[d]) != 0.0)
+        str <<"\n                            Max "<< char('X'+d)
+            <<"-velocity : "<< dMax[d] <<" node "<< iMax[d];
+  }
+
+  IFEM::cout << str.str() << std::endl;
+}
+
+
+template<class Dim>
 void SIMPoisson<Dim>::printNormGroup (const Vector& gNorm, const Vector& fNorm,
                                       const std::string& name) const
 {
@@ -418,7 +521,7 @@ bool SIMPoisson<Dim>::preprocessBeforeAsmInit (int& nnod)
     for (int p = 1; p <= this->getNoPatches(); ++p) {
       int lp = this->getLocalPatchIndex(p);
       if (lp > 0)
-        this->getPatch(lp)->addGlobalLagrangeMultipliers({nnod}, 1);
+        this->getPatch(lp)->addGlobalLagrangeMultipliers({nnod}, this->getNoFields());
     }
   }
 
@@ -436,11 +539,17 @@ void SIMPoisson<Dim>::preprocessA ()
 
   if (sourceFromAnaSol) {
     int code = -1; // Reserve negative code(s) for the source term function
-    while (this->myScalars.find(code) != this->myScalars.end())
-      --code;
-    this->myScalars[code] = new PoissonAnaSolSource(*Dim::mySol, prob);
-
-    prob.setSource(this->myScalars[code]);
+    if (this->getNoFields() > 1) {
+      while (this->myVectors.find(code) != this->myVectors.end())
+        --code;
+      this->myVectors[code] = new PoissonAnaSolSourceVec(*Dim::mySol, prob);
+      prob.setSource(this->myVectors[code]);
+    } else {
+      while (this->myScalars.find(code) != this->myScalars.end())
+        --code;
+      this->myScalars[code] = new PoissonAnaSolSource(*Dim::mySol, prob);
+      prob.setSource(this->myScalars[code]);
+    }
   }
 
   if (!Dim::mySol) return;
@@ -452,33 +561,64 @@ void SIMPoisson<Dim>::preprocessA ()
   for (p = Dim::myProps.begin(); p != Dim::myProps.end(); ++p)
     if (p->pcode == Property::DIRICHLET_ANASOL)
     {
-      if (!Dim::mySol->getScalarSol())
-        p->pcode = Property::UNDEFINED;
-      else if (aCode[0] == abs(p->pindx))
-        p->pcode = Property::DIRICHLET_INHOM;
-      else if (aCode[0] == 0)
-      {
-        aCode[0] = abs(p->pindx);
-        Dim::myScalars[aCode[0]] = Dim::mySol->getScalarSol();
-        p->pcode = Property::DIRICHLET_INHOM;
+      if (this->getNoFields() > 1) {
+        if (!Dim::mySol->getVectorSol())
+          p->pcode = Property::UNDEFINED;
+        else if (aCode[p->basis-1] == abs(p->pindx))
+          p->pcode = Property::DIRICHLET_INHOM;
+        else if (aCode[p->basis-1] == 0)
+        {
+          aCode[p->basis-1] = abs(p->pindx);
+          Dim::myScalars[aCode[p->basis-1]] = new SingleCompFunc(*Dim::mySol->getVectorSol(), p->basis-1);
+          p->pcode = Property::DIRICHLET_INHOM;
+        }
+        else
+          p->pcode = Property::UNDEFINED;
+
+      } else {
+        if (!Dim::mySol->getScalarSol())
+          p->pcode = Property::UNDEFINED;
+        else if (aCode[0] == abs(p->pindx))
+          p->pcode = Property::DIRICHLET_INHOM;
+        else if (aCode[0] == 0)
+        {
+          aCode[0] = abs(p->pindx);
+          Dim::myScalars[aCode[0]] = Dim::mySol->getScalarSol();
+          p->pcode = Property::DIRICHLET_INHOM;
+        }
+        else
+          p->pcode = Property::UNDEFINED;
       }
-      else
-        p->pcode = Property::UNDEFINED;
     }
     else if (p->pcode == Property::NEUMANN_ANASOL)
     {
-      if (!Dim::mySol->getScalarSecSol())
-        p->pcode = Property::UNDEFINED;
-      else if (aCode[1] == p->pindx)
-        p->pcode = Property::NEUMANN;
-      else if (aCode[1] == 0)
-      {
-        aCode[1] = p->pindx;
-        Dim::myVectors[aCode[1]] = Dim::mySol->getScalarSecSol();
-        p->pcode = Property::NEUMANN;
+      if (this->getNoFields() > 1) {
+        if (!Dim::mySol->getVectorSol())
+          p->pcode = Property::UNDEFINED;
+        else if (aCode[3] == p->pindx)
+          p->pcode = Property::NEUMANN;
+        else if (aCode[3] == 0)
+        {
+          aCode[3] = p->pindx;
+          Dim::myTracs[aCode[3]] = new NeumannFromAnaSol(*Dim::mySol->getVectorSol());
+          p->pcode = Property::NEUMANN;
+        }
+        else
+          p->pcode = Property::UNDEFINED;
+      } else {
+        if (!Dim::mySol->getScalarSecSol())
+          p->pcode = Property::UNDEFINED;
+        else if (aCode[3] == p->pindx)
+          p->pcode = Property::NEUMANN;
+        else if (aCode[3] == 0)
+        {
+          aCode[3] = p->pindx;
+          Dim::myVectors[aCode[3]] = Dim::mySol->getScalarSecSol();
+          p->pcode = Property::NEUMANN;
+        }
+        else
+          p->pcode = Property::UNDEFINED;
       }
-      else
-        p->pcode = Property::UNDEFINED;
     } else if (p->pcode == Property::ROBIN)
       if (Dim::myInts.find(p->pindx) == Dim::myInts.end())
         Dim::myInts.insert(std::make_pair(p->pindx,&robinBC));
@@ -569,9 +709,14 @@ bool SIMPoisson<Dim>::parse (const tinyxml2::XMLElement* elem)
       const char* val = utl::getValue(child,"constrain_integrated_solution");
       IFEM::cout << "\tConstraining integrated solution";
       if (val) {
+        std::istringstream str(val);
+        str >> integrated_solution[0] >> integrated_solution[1] >> integrated_solution[2];
+        IFEM::cout << " to";
         // Scale by NoProcs because contribution is added once for each process
-        integrated_solution = atof(val) / Dim::adm.getNoProcs();
-        IFEM::cout << " to " << val;
+        for (size_t i = 0; i < this->getNoFields(); ++i) {
+          integrated_solution[i] /= Dim::adm.getNoProcs();
+          IFEM::cout << ' ' << integrated_solution[i];
+        }
       }
       IFEM::cout << std::endl;
     }
@@ -604,8 +749,18 @@ bool SIMPoisson<Dim>::initMaterial (size_t propInd)
 template<class Dim>
 bool SIMPoisson<Dim>::initNeumann (size_t propInd)
 {
-  typename Dim::SclFuncMap::const_iterator sit = Dim::myScalars.find(propInd);
-  typename Dim::VecFuncMap::const_iterator vit = Dim::myVectors.find(propInd);
+  if (this->getNoFields() > 1) {
+    const auto tit = Dim::myTracs.find(propInd);
+    if (tit != Dim::myTracs.end())
+      prob.setTraction(tit->second);
+    else
+      return false;
+
+    return true;
+  }
+
+  const auto sit = Dim::myScalars.find(propInd);
+  const auto vit = Dim::myVectors.find(propInd);
 
   if (sit != Dim::myScalars.end()) {
     prob.setTraction(sit->second);
@@ -633,8 +788,10 @@ assembleDiscreteTerms(const IntegrandBase* p, const TimeDomain&)
   if (!v) return false;
 
   int node = Dim::mySam->getNoNodes();
-  int eq = Dim::mySam->getEquation(node,1);
-  v->getPtr()[eq-1] = integrated_solution;
+  for (size_t i = 1; i <= this->getNoFields(); ++i) {
+    int eq = Dim::mySam->getEquation(node,i);
+    v->getPtr()[eq-1] = integrated_solution[i-1];
+  }
 
   return true;
 }
@@ -1025,7 +1182,7 @@ bool SIMPoisson<SIM2D>::parseDimSpecific (const tinyxml2::XMLElement* child)
       type[0] = toupper(type[0]);
       std::cout <<"\tAnalytical solution: "<< type << std::endl;
       if (!mySol)
-        mySol = new PoissonAnaSol(child);
+        mySol = this->getNoFields() > 1 ? new AnaSol(child, false) : new PoissonAnaSol(child);
     }
     else
       std::cerr <<"  ** SIMPoisson2D::parse: Invalid analytical solution "
@@ -1215,7 +1372,7 @@ bool SIMPoisson<SIM3D>::parseDimSpecific (const tinyxml2::XMLElement* child)
       type[0] = toupper(type[0]);
       std::cout <<"\tAnalytical solution: "<< type << std::endl;
       if (!mySol)
-        mySol = new PoissonAnaSol(child);
+        mySol = this->getNoFields() > 1 ? new AnaSol(child, false) : new PoissonAnaSol(child);
     }
     else
       std::cerr <<"  ** SIMPoisson3D::parse: Invalid analytical solution "

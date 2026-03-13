@@ -22,6 +22,7 @@
 class AnaSol;
 class FunctionBase;
 class RealFunc;
+class TractionFunc;
 class VecFunc;
 
 
@@ -81,9 +82,15 @@ public:
     const Poisson& integrand; //!< Main integrand instance
   };
 
+  enum BlockIndices {
+      uu = 1,                  ul = 7,
+              vv = 2,          vl = 10,
+                       ww = 3, wl = 13,
+  };
+
   //! \brief The default constructor initializes all pointers to zero.
   //! \param[in] n Number of spatial dimensions
-  explicit Poisson(unsigned short int n = 3);
+  explicit Poisson(unsigned short int n = 3, bool vectorial = false);
   //! \brief The destructor deletes the functions to be Galerkin-projected.
   virtual ~Poisson() { this->clearGalerkinProjections(); }
 
@@ -92,10 +99,14 @@ public:
 
   //! \brief Defines the traction field to use in Neumann boundary conditions.
   void setTraction(VecFunc* tf) { tracFld = tf; }
+  //! \brief Defines the traction field to use in Neumann boundary conditions.
+  void setTraction(TractionFunc* tf) { tracFldV = tf; }
   //! \brief Defines the heat flux field to use in Neumann boundary conditions.
   void setTraction(RealFunc* ff) { fluxFld = ff; }
   //! \brief Defines the heat source field.
   void setSource(RealFunc* src) { heatSrc = src; }
+  //! \brief Defines the heat source field.
+  void setSource(VecFunc* src) { heatSrcV = src; }
   //! \brief Defines the extraction function of the dual problem.
   void setDualRHS(FunctionBase* df) { dualRHS = df; }
   //! \brief Defines an extraction function for VCP.
@@ -145,12 +156,25 @@ public:
   LocalIntegral* getLocalIntegral(size_t nen, size_t,
                                   bool neumann) const override;
 
+  //! \brief Returns a local integral container for the given element
+  //! \param[in] nen Number of nodes on element
+  LocalIntegral* getLocalIntegral(const std::vector<size_t>& nen,
+                                  size_t, bool) const override;
+
   using IntegrandBase::evalInt;
   //! \brief Evaluates the integrand at an interior point.
   //! \param elmInt The local integral object to receive the contributions
   //! \param[in] fe Finite element data of current integration point
   //! \param[in] X Cartesian coordinates of current integration point
   bool evalInt(LocalIntegral& elmInt, const FiniteElement& fe,
+               const Vec3& X) const override;
+
+  using IntegrandBase::evalIntMx;
+  //! \brief Evaluates the integrand at an interior point.
+  //! \param elmInt The local integral object to receive the contributions
+  //! \param[in] fe Finite element data of current integration point
+  //! \param[in] X Cartesian coordinates of current integration point
+  bool evalIntMx(LocalIntegral& elmInt, const MxFiniteElement& fe,
                const Vec3& X) const override;
 
   using IntegrandBase::evalBou;
@@ -161,6 +185,15 @@ public:
   //! \param[in] normal Boundary normal vector at current integration point
   bool evalBou(LocalIntegral& elmInt, const FiniteElement& fe,
                const Vec3& X, const Vec3& normal) const override;
+
+  using IntegrandBase::evalBouMx;
+  //! \brief Evaluates the integrand at an boundary point.
+  //! \param elmInt The local integral object to receive the contributions
+  //! \param[in] fe Finite element data of current integration point
+  //! \param[in] X Cartesian coordinates of current integration point
+  //! \param[in] normal Boundary normal vector at current integration point
+  bool evalBouMx(LocalIntegral& elmInt, const MxFiniteElement& fe,
+                 const Vec3& X, const Vec3& normal) const override;
 
   //! \brief Evaluates the secondary solution at a result point.
   //! \param[out] s The solution field values at current point
@@ -179,8 +212,12 @@ public:
 
   //! \brief Evaluates the boundary heat flux (if any) at specified point.
   double getFlux(const Vec3& X, const Vec3& n) const;
+  //! \brief Evaluates the boundary heat flux (if any) at specified point.
+  Vec3 getFluxV(const Vec3& X, const Vec3& n) const;
   //! \brief Evaluates the heat source (if any) at specified point.
   double getHeat(const Vec3& X) const;
+  //! \brief Evaluates the heat source (if any) at specified point.
+  Vec3 getHeatV(const Vec3& X) const;
 
   //! \brief Writes the heat flux vector for a given time step to VTF-file.
   //! \param vtf The VTF-file object to receive the heat flux vectors
@@ -202,7 +239,7 @@ public:
 
   //! \brief Returns the number of primary/secondary solution field components.
   //! \param[in] fld which field set to consider (1=primary, 2=secondary)
-  size_t getNoFields(int fld) const override { return fld > 1 ? 2*nsd : 1; }
+  size_t getNoFields(int fld) const override { return fld > 1 ? 2*nsd : isVectorial ? nsd : 1; }
   //! \brief Returns the name of the primary solution field.
   //! \param[in] prefix Name prefix
   std::string getField1Name(size_t, const char* prefix) const override;
@@ -222,7 +259,10 @@ public:
   //! \brief Defines which FE quantities are needed by the integrand.
   int getIntegrandType() const override
   {
-    return dualFld.empty() ? STANDARD : ELEMENT_CENTER;
+    if (isVectorial)
+      return Integrand::PIOLA_MAPPING;
+    else
+      return dualFld.empty() ? Integrand::STANDARD : ELEMENT_CENTER;
   }
 
   //! \brief Returns whether this norm has explicit boundary contributions.
@@ -247,8 +287,10 @@ private:
   double    kappaC;  //!< Conductivity (constant)
   RealFunc* kappaF;  //!< Pointer to conductivity function
   VecFunc*  tracFld; //!< Pointer to boundary traction field
+  TractionFunc*  tracFldV; //!< Pointer to boundary traction field
   RealFunc* fluxFld; //!< Pointer to boundary normal flux field
   RealFunc* heatSrc; //!< Pointer to interior heat source
+  VecFunc* heatSrcV; //!< Pointer to interior heat source
 
   FunctionBase*              dualRHS; //!< Extraction function for dual RHS
   std::vector<FunctionBase*> dualFld; //!< Extraction functions for VCP
@@ -262,6 +304,7 @@ private:
   std::vector<VecFunc*> galerkin; //!< Functions to be Galerkin-projected
 
   bool setIntegratedSol = false; //!< True to constrain solution integral
+  bool isVectorial = false; //!< True if we are solving vector Poisson
 
 public:
   char extEner; //!< If \e true, external energy is to be computed

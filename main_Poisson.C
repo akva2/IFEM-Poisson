@@ -11,6 +11,7 @@
 //!
 //==============================================================================
 
+#include "ASMmxBase.h"
 #include "SIMPoisson.h"
 
 #include "ASMenums.h"
@@ -48,11 +49,12 @@ public:
   bool fixDup;    //!< If \e true, collapse co-located nodes into a single node
   bool dumpASCII; //!< If \e true, dump model and solution to ASCII files
   bool dualSol;   //!< If \e true, also calculate the dual solution
+  bool piola;     //!< if \e true, run the Piola mapped solver
 
   //! \brief Default constructor.
   PoissonArgs() : SIMargsBase("poisson")
   {
-    checkRHS = vizRHS = fixDup = dumpASCII = dualSol = false;
+    checkRHS = vizRHS = fixDup = dumpASCII = dualSol = piola = false;
   }
 
   //! \brief Parses a command-line argument.
@@ -71,12 +73,24 @@ public:
       fixDup = true;
     else if (!strcmp(argv[i],"-dumpASC"))
       dumpASCII = true;
+    else if (!strcmp(argv[i],"-piola"))
+      piola = true;
     else if (!strncmp(argv[i],"-dualadap",9))
       adap = 'd';
     else
       return this->parseArg(argv[i]);
 
     return true;
+  }
+
+  bool parse(const tinyxml2::XMLElement* elem)
+  {
+    if (!strcasecmp(elem->Value(),"poisson")) {
+      if (utl::getAttribute(elem, "piola", piola))
+        return true;
+    }
+
+    return this->SIMargsBase::parse(elem);
   }
 };
 
@@ -91,6 +105,54 @@ template<class Dim, template<class T> class Solver=SIMSolverStat>
 int runSimulator(char* infile, const PoissonArgs& arg)
 {
   SIMPoisson<Dim> model(arg.checkRHS,arg.dualSol);
+  Solver<SIMPoisson<Dim>> solver(model);
+
+  utl::profiler->start("Model input");
+
+  // Read in model definitions
+  if (!model.read(infile) || !solver.read(infile))
+    return 1;
+
+  // Boundary conditions can be ignored only in generalized eigenvalue analysis
+  if (model.opt.eig != 4 && model.opt.eig != 6)
+    SIMbase::ignoreDirichlet = false;
+
+  // Load vector visualization is not available when using additional viz-points
+  model.setVizRHS(arg.vizRHS);
+  for (int i = 0; i < 3; i++)
+    if (i >= Dim::dimension)
+      model.opt.nViz[i] = 1;
+    else if (model.opt.nViz[i] > 2)
+      model.setVizRHS(false);
+
+  model.opt.print(IFEM::cout,true) << std::endl;
+
+  utl::profiler->stop("Model input");
+
+  // Establish the FE data structures
+  if (!model.preprocess(arg.ignoredPatches,arg.fixDup))
+    return 2;
+
+  if (arg.dumpASCII)
+    model.setASCIIfile(infile);
+
+  if (model.opt.dumpHDF5(infile))
+    solver.handleDataOutput(model.opt.hdf5,model.getProcessAdm());
+
+  return solver.solveProblem(infile,"Solving the Poisson problem");
+}
+
+template<class Dim, template<class T> class Solver=SIMSolverStat>
+int runSimulatorP(char* infile, const PoissonArgs& arg)
+{
+  using CharVec = typename Dim::CharVec;
+  CharVec fields;
+  if (arg.piola) {
+    ASMmxBase::Type = ASMmxBase::DIV_COMPATIBLE;
+    fields.resize(Dim::dimension, 1);
+    fields.push_back(0);
+  }
+  SIMPoisson<Dim> model(fields, arg.checkRHS);
   Solver<SIMPoisson<Dim>> solver(model);
 
   utl::profiler->start("Model input");
@@ -234,6 +296,11 @@ int main (int argc, char** argv)
     case 2: return runSimulator<SIM2D,SIMSolverAdap>(infile,args);
     case 3: return runSimulator<SIM3D,SIMSolverAdap>(infile,args);
   }
+  else if (args.piola)
+    switch (args.dim) {
+    case 2: return runSimulatorP<SIM2D>(infile,args);
+    case 3: return runSimulatorP<SIM3D>(infile,args);
+    }
   else
     switch (args.dim) {
     case 1: return runSimulator<SIM1D>(infile,args);

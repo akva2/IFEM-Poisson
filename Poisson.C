@@ -11,6 +11,7 @@
 //!
 //==============================================================================
 
+#include "BlockElmMats.h"
 #include "Fields.h"
 #include "Poisson.h"
 
@@ -21,6 +22,7 @@
 #include "Function.h"
 #include "FiniteElement.h"
 #include "GlobalIntegral.h"
+#include "PiolaOperators.h"
 #include "Vec3Oper.h"
 #include "VTF.h"
 
@@ -35,11 +37,14 @@
 #include <utility>
 
 
-Poisson::Poisson (unsigned short int n) : IntegrandBase(n)
+Poisson::Poisson (unsigned short int n, bool vectorial)
+  : IntegrandBase(n), isVectorial(vectorial)
 {
   kappaC  = 1.0;
   fluxFld = heatSrc = kappaF = nullptr;
+  heatSrcV = nullptr;
   tracFld = nullptr;
+  tracFldV = nullptr;
   reacInt = nullptr;
   dualRHS = nullptr;
   aSol    = nullptr;
@@ -70,6 +75,12 @@ double Poisson::getHeat (const Vec3& X) const
 }
 
 
+Vec3 Poisson::getHeatV (const Vec3& X) const
+{
+  return heatSrcV ? (*heatSrcV)(X) : Vec3();
+}
+
+
 double Poisson::getFlux (const Vec3& X, const Vec3& n) const
 {
   if (fluxFld)
@@ -78,6 +89,12 @@ double Poisson::getFlux (const Vec3& X, const Vec3& n) const
     return (*tracFld)(X)*n;
   else
     return 0.0;
+}
+
+
+Vec3 Poisson::getFluxV (const Vec3& X, const Vec3& n) const
+{
+  return tracFldV ? (*tracFldV)(X,n) : Vec3();
 }
 
 
@@ -195,6 +212,25 @@ LocalIntegral* Poisson::getLocalIntegral (size_t nen, size_t,
 }
 
 
+LocalIntegral*
+Poisson::getLocalIntegral (const std::vector<size_t>& nen,
+                           size_t, bool) const
+{
+  BlockElmMats* result = new BlockElmMats(4, 4);
+  result->resize(17, 5);
+  for (size_t i = 1; i <= 3; ++i)
+    result->redim(i, i <= nsd ? nen[i-1] : 0, 1, i);
+  result->redim(4, setIntegratedSol ? 1 : 0, nsd, -4);
+  result->redimOffDiag(ul, 1);
+  result->redimOffDiag(vl, 1);
+  if (nsd == 3)
+    result->redimOffDiag(wl, 1);
+
+  result->finalize();
+  return result;
+}
+
+
 bool Poisson::evalInt (LocalIntegral& elmInt, const FiniteElement& fe,
                        const Vec3& X) const
 {
@@ -259,6 +295,25 @@ bool Poisson::evalInt (LocalIntegral& elmInt, const FiniteElement& fe,
 }
 
 
+bool Poisson::evalIntMx (LocalIntegral& elmInt, const MxFiniteElement& fe,
+                         const Vec3& X) const
+{
+  ElmMats& elMat = static_cast<ElmMats&>(elmInt);
+  const auto Aidx = std::array{
+    std::array{1, 5, 6},
+    std::array{8, 2, 9},
+    std::array{11, 12, 3},
+  };
+
+  PiolaOperators::Weak::Laplacian(elMat.A, fe, Aidx, 1.0, false);
+  PiolaOperators::Weak::Source(elMat.b, fe, this->getHeatV(X), {1,2,3}, 1.0);
+  if (setIntegratedSol)
+    PiolaOperators::Weak::ItgConstraint(elMat.A, fe, {ul, vl, wl});
+
+  return true;
+}
+
+
 bool Poisson::evalBou (LocalIntegral& elmInt, const FiniteElement& fe,
                        const Vec3& X, const Vec3& normal) const
 {
@@ -288,6 +343,31 @@ bool Poisson::evalBou (LocalIntegral& elmInt, const FiniteElement& fe,
 
   // Integrate the Neumann value
   elMat.b.front().add(fe.N,h*fe.detJxW);
+
+  return true;
+}
+
+bool Poisson::evalBouMx (LocalIntegral& elmInt, const MxFiniteElement& fe,
+                       const Vec3& X, const Vec3& normal) const
+{
+  if (!tracFldV)
+  {
+    std::cerr <<" *** Poisson::evalBouMx: No heat flux."<< std::endl;
+    return false;
+  }
+
+  ElmMats& elMat = static_cast<ElmMats&>(elmInt);
+  if (elMat.b.empty())
+  {
+    std::cerr <<" *** Poisson::evalBou: No load vector."<< std::endl;
+    return false;
+  }
+
+  // Evaluate the Neumann value h
+  Vec3 h = this->getFluxV(X,normal);
+
+  // Integrate the Neumann value
+  PiolaOperators::Weak::Source(elMat.b, fe, h, {1,2,3}, 1.0);
 
   return true;
 }
@@ -348,9 +428,9 @@ Vector* Poisson::getExtractionField (size_t ifield)
 }
 
 
-std::string Poisson::getField1Name (size_t, const char* prefix) const
+std::string Poisson::getField1Name (size_t i, const char* prefix) const
 {
-  if (!prefix) return "u";
+  if (!prefix) return i == 0 ? "u" : "v";
 
   return prefix + std::string(" u");
 }
@@ -393,6 +473,7 @@ double Poisson::getMaterial (const Vec3& X) const
 
 NormBase* Poisson::getNormIntegrand (AnaSol* asol) const
 {
+  return nullptr;
   return new PoissonNorm(*const_cast<Poisson*>(this), normIntegrandType,
                          asol ? asol->getScalarSecSol() : nullptr);
 }
